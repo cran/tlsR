@@ -1,0 +1,24 @@
+Package: tlsR
+Title: Detection and Spatial Analysis of Tertiary Lymphoid Structures
+Version: 0.1.2
+Authors@R: c(person("Ali","Amiryousefi",email="ali_amiryousefi@hms.harvard.edu",role=c("aut","cre"),comment=c(ORCID="0000-0002-6317-3860")),person("Jeremiah","Wala",email="jeremiah_wala@dfci.harvard.edu",role="aut",comment=c(ORCID="0000-0001-6591-1620")),person("Peter","Sorger",role="ctb",comment=c(ORCID="0000-0002-3364-1838")))
+Description: Fast, reproducible detection and quantitative analysis of tertiary lymphoid structures (TLS) in multiplexed tissue imaging. Implements Independent Component Analysis Trace (ICAT) index, local Ripley's K scanning, automated K Nearest Neighbor (KNN)-based TLS detection, and T-cell clusters identification as described in Amiryousefi et al. (2025) <doi:10.1101/2025.09.21.677465>.
+Note: TLS, ICAT, KNN are correct technical acronyms.
+License: MIT + file LICENSE
+Encoding: UTF-8
+LazyData: true
+RoxygenNote: 7.3.2
+Imports: fastICA, spatstat.geom, spatstat.explore, dbscan, RANN,
+        grDevices, graphics, stats, utils
+Suggests: testthat (>= 3.0.0)
+Config/testthat/edition: 3
+Depends: R (>= 3.5)
+NeedsCompilation: no
+Packaged: 2025-12-13 18:00:49 UTC; aliamiryousefi
+Author: Ali Amiryousefi [aut, cre] (ORCID:
+    <https://orcid.org/0000-0002-6317-3860>),
+  Jeremiah Wala [aut] (ORCID: <https://orcid.org/0000-0001-6591-1620>),
+  Peter Sorger [ctb] (ORCID: <https://orcid.org/0000-0002-3364-1838>)
+Maintainer: Ali Amiryousefi <ali_amiryousefi@hms.harvard.edu>
+Repository: CRAN
+Date/Publication: 2025-12-18 14:40:03 UTC
