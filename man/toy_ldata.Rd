@@ -3,33 +3,37 @@
 \docType{data}
 \name{toy_ldata}
 \alias{toy_ldata}
-\title{Toy multiplexed imaging data for examples}
+\title{Toy Multiplexed Imaging Data}
 \format{
 A named list with one element:
 \describe{
-\item{ToySample}{A data frame with columns:
-\itemize{
-\item x: x-coordinate in microns
-\item y: y-coordinate in microns
-\item coarse_phen_vec: Cell phenotype ("B cells", "T cells", or "Other")
-\item row_index: Integer row index (1 to nrow)
-\item cflag: Integer flag column (0 for all cells)
+  \item{\code{ToySample}}{A \code{data.frame} with the following columns:
+    \describe{
+      \item{\code{x}}{Numeric. X coordinate in microns.}
+      \item{\code{y}}{Numeric. Y coordinate in microns.}
+      \item{\code{phenotype}}{Character. Cell phenotype label.  Values are
+        \code{"B cell"}, \code{"T cell"}, and \code{"Other"}.}
+    }
+  }
 }
 }
-}
+\source{
+Synthetically generated for package examples.
 }
 \usage{
 toy_ldata
 }
 \description{
-A small synthetic dataset mimicking multiplexed tissue imaging data.
-It contains one sample named "ToySample" with columns required by tlsR functions.
+A small synthetic dataset mimicking multiplexed tissue imaging data, used in
+package examples and tests.  The list contains one sample named
+\code{"ToySample"}.
 }
 \examples{
 data(toy_ldata)
-str(toy_ldata[["ToySample"]])
-plot(toy_ldata[["ToySample"]]$x, toy_ldata[["ToySample"]]$y,
-     col = as.factor(toy_ldata[["ToySample"]]$coarse_phen_vec),
-     pch = 19, cex = 0.5, main = "Toy sample cells")
+str(toy_ldata)
+table(toy_ldata[["ToySample"]]$phenotype)
+}
+\references{
+Amiryousefi et al. (2025) \doi{10.1101/2025.09.21.677465}
 }
 \keyword{datasets}

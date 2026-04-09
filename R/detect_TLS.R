@@ -1,21 +1,42 @@
-#' @name detect_TLS
-#' @title Detect Tertiary Lymphoid Structures using a KNN-density approach
-#' @description This function identifies TLS candidates germinated with B cells (BIC) by: 1. Finding regions of high local B-cell density (KNN-based). 2. Requiring a minimum number of neighbouring T cells (T-B cell co-localisation). 3. Applying sensible size and shape filters.
-#' @param LSP Character. Sample name in the global \code{ldata} list.
-#' @param k Integer. Number of nearest neighbours to consider (default 30 - works very well on 0.325 um/px imaging).
-#' @param bcell_density_threshold Numeric. Minimum average 1/k-distance for B cells to be considered "dense" (default 15 um).
-#' @param min_B_cells Integer. Minimum number of B cells in a candidate TLS (default 50).
-#' @param min_T_cells_nearby Integer. Minimum T cells within 50 um of the B-cell cluster centre (default 30).
-#' @param max_distance_T Numeric. Radius (um) to search for surrounding T cells (default 50).
-#' @param ldata Optional. Named list of data frames. If \code{NULL}, uses global \code{ldata}.
+#' Detect Tertiary Lymphoid Structures using a KNN-density approach
 #'
-#' @return The original data frame with two new columns:
-#' \item{tls_id_knn}{0 = non-TLS, positive integer = TLS cluster ID}
-#' \item{tls_center_x, tls_center_y}{Coordinates of detected TLS centres (only for TLS cells)}
+#' Identifies TLS candidates by finding regions of high local B-cell density
+#' that also contain a sufficient number of nearby T cells (B+T
+#' co-localisation).  The algorithm proceeds in three steps:
+#' \enumerate{
+#'   \item For every B cell, compute the average inverse-kNN distance as a
+#'         local density estimate.
+#'   \item Retain B cells whose density exceeds \code{bcell_density_threshold}.
+#'   \item Label connected components of dense B cells (DBSCAN-style, using
+#'         \code{k}-NN graph edges) and keep components that also satisfy
+#'         minimum B-cell count and T-cell proximity requirements.
+#' }
 #'
-#' @importFrom RANN nn2
-#' @importFrom stats kmeans quantile
-#' @export
+#' @param LSP Character. Sample name in \code{ldata}.
+#' @param k Integer. Number of nearest neighbours used for density estimation
+#'   (default \code{30}, calibrated for 0.325 um/px imaging).
+#' @param bcell_density_threshold Numeric. Minimum average 1/k-distance (in
+#'   microns) for a B cell to be considered locally dense (default \code{15}).
+#' @param min_B_cells Integer. Minimum B cells per candidate TLS cluster
+#'   (default \code{50}).
+#' @param min_T_cells_nearby Integer. Minimum T cells within
+#'   \code{max_distance_T} microns of the candidate cluster centre
+#'   (default \code{30}).
+#' @param max_distance_T Numeric. Search radius (microns) for T-cell proximity
+#'   check (default \code{50}).
+#' @param ldata Named list of data frames, or \code{NULL} to use the global
+#'   \code{ldata} object (deprecated; pass explicitly).
+#'
+#' @return The input \code{ldata} list, with the data frame for \code{LSP}
+#'   augmented by three new columns:
+#'   \describe{
+#'     \item{\code{tls_id_knn}}{Integer. \code{0} = non-TLS cell; positive
+#'       integer = TLS cluster ID.}
+#'     \item{\code{tls_center_x}}{Numeric. X coordinate of the TLS centre for
+#'       TLS cells; \code{NA} otherwise.}
+#'     \item{\code{tls_center_y}}{Numeric. Y coordinate of the TLS centre for
+#'       TLS cells; \code{NA} otherwise.}
+#'   }
 #'
 #' @examples
 #' data(toy_ldata)
@@ -24,110 +45,116 @@
 #' plot(ldata[["ToySample"]]$x, ldata[["ToySample"]]$y,
 #'      col = ifelse(ldata[["ToySample"]]$tls_id_knn > 0, "red", "gray"),
 #'      pch = 19, cex = 0.5, main = "Detected TLS in toy data")
-utils::globalVariables("coarse_phen_vec")
+#'
+#' @importFrom FNN get.knn
+#' @export
 detect_TLS <- function(LSP,
-                       k = 30,
-                       bcell_density_threshold = 15,
-                       min_B_cells = 50,
-                       min_T_cells_nearby = 30,
-                       max_distance_T = 50,
-                       ldata = NULL) {
+                       k                       = 30L,
+                       bcell_density_threshold = 10,
+                       min_B_cells             = 50L,
+                       min_T_cells_nearby      = 20L,
+                       max_distance_T          = 50,
+                       ldata                   = NULL) {
 
-  if (is.null(ldata)) {
-    if (!exists("ldata", envir = .GlobalEnv))
-      stop("ldata not found in global environment.")
-    ldata <- get("ldata", envir = .GlobalEnv)
+  ldata <- .resolve_ldata(ldata)
+  .check_sample(LSP, ldata)
+
+  df <- ldata[[LSP]]
+
+  # Initialise output columns
+  df$tls_id_knn   <- 0L
+  df$tls_center_x <- NA_real_
+  df$tls_center_y <- NA_real_
+
+  # Subset B cells and T cells (accepts both "B cell" and "B cells")
+  b_idx <- which(.is_bcell(df$phenotype))
+  t_idx <- which(.is_tcell(df$phenotype))
+
+  if (length(b_idx) < k + 1L) {
+    message("Sample '", LSP, "': fewer B cells (", length(b_idx),
+            ") than k+1 (", k + 1L, "); no TLS detected.")
+    ldata[[LSP]] <- df
+    return(ldata)
   }
 
-  d <- ldata[[LSP]]
-  if (is.null(d)) stop(paste("Sample", LSP, "not found in ldata."))
+  b_coords <- as.matrix(df[b_idx, c("x", "y")])
+  t_coords <- if (length(t_idx) > 0) as.matrix(df[t_idx, c("x", "y")]) else NULL
 
-  # Ensure clean starting point
-  d$tls_id_knn <- 0
-  d$tls_center_x <- NA_real_
-  d$tls_center_y <- NA_real_
+  # Step 1: KNN density for B cells
+  knn_res  <- FNN::get.knn(b_coords, k = k)
+  avg_dist <- rowMeans(knn_res$nn.dist)
+  density  <- 1 / (avg_dist + .Machine$double.eps)
 
-  # 1. Extract B cells only
-  Bcells <- subset(d, coarse_phen_vec == "B cells")
-  if (nrow(Bcells) == 0) {
-    ldata[[LSP]] <- d
-    message("No B cells found in ", LSP)
-    return(invisible(ldata))
+  dense_mask <- density >= (1 / bcell_density_threshold)
+
+  if (sum(dense_mask) == 0) {
+    message("Sample '", LSP, "': no B cells exceed density threshold; ",
+            "no TLS detected.")
+    ldata[[LSP]] <- df
+    return(ldata)
   }
 
-  coords_B <- as.matrix(Bcells[, c("x", "y")])
+  # Step 2: Connected-component labelling on dense B cells
+  dense_b_coords <- b_coords[dense_mask, , drop = FALSE]
+  n_dense        <- nrow(dense_b_coords)
+  k_local        <- min(k, n_dense - 1L)
 
-  # 2. KNN distances for every B cell (k-th nearest B-cell neighbour)
-  nn_B <- RANN::nn2(coords_B, k = k + 1)        # +1 because distance to itself = 0
-  knn_dist_B <- nn_B$nn.dists[, k + 1]          # k-th nearest distance
-
-  # 3. Local density score = 1 / mean distance to k nearest B cells to higher = denser
-  density_score <- 1 / knn_dist_B
-
-  # 4. Candidate B cells = very dense ones
-  candidates <- which(knn_dist_B <= bcell_density_threshold & density_score > quantile(density_score, 0.85))
-
-  if (length(candidates) == 0) {
-    ldata[[LSP]] <- d
-    message("No dense B-cell regions found in ", LSP)
-    return(invisible(ldata))
+  if (k_local < 1L) {
+    ldata[[LSP]] <- df
+    return(ldata)
   }
 
-  candidate_coords <- coords_B[candidates, , drop = FALSE]
+  knn_dense    <- FNN::get.knn(dense_b_coords, k = k_local)
+  component_id <- integer(n_dense)
+  current_id   <- 0L
 
-  # 5. Cluster the dense B-cell points (k-means is fast and excellent here)
-  # Removed set.seed(42) as required by CRAN
-  km <- kmeans(candidate_coords, centers = max(1, round(length(candidates)/50)), nstart = 10)
-  cluster_labels <- km$cluster
-  centers <- km$centers
-
-  tls_id <- 1
-  all_tls_cells <- integer(0)
-
-  message(sprintf("Sample %s: Found %d candidate TLS cores (k=%d)", LSP, nrow(centers), k))
-
-  # 6. Validate each candidate cluster
-  for (i in seq_len(nrow(centers))) {
-    centre_x <- centers[i, 1]
-    centre_y <- centers[i, 2]
-
-    # B cells belonging to this cluster
-    cluster_B_idx_global <- Bcells$row_index[candidates[cluster_labels == i]]
-    if (length(cluster_B_idx_global) < min_B_cells) next
-
-    # T cells within max_distance_T um of this centre
-    Tcells <- subset(d, coarse_phen_vec == "T cells")
-    if (nrow(Tcells) == 0) next
-    dist_to_centre <- sqrt((Tcells$x - centre_x)^2 + (Tcells$y - centre_y)^2)
-    nearby_T <- sum(dist_to_centre <= max_distance_T)
-
-    if (nearby_T >= min_T_cells_nearby) {
-      # Accepted as real TLS
-      d$tls_id_knn[cluster_B_idx_global] <- tls_id
-      d$tls_center_x[cluster_B_idx_global] <- centre_x
-      d$tls_center_y[cluster_B_idx_global] <- centre_y
-
-      all_tls_cells <- c(all_tls_cells, cluster_B_idx_global)
-      tls_id <- tls_id + 1
+  for (i in seq_len(n_dense)) {
+    if (component_id[i] != 0L) next
+    current_id <- current_id + 1L
+    queue <- i
+    while (length(queue) > 0) {
+      cur   <- queue[1]
+      queue <- queue[-1]
+      if (component_id[cur] != 0L) next
+      component_id[cur] <- current_id
+      nbrs  <- knn_dense$nn.index[cur, ]
+      nbrs  <- nbrs[component_id[nbrs] == 0L]
+      queue <- c(queue, nbrs)
     }
   }
 
-  # Optional: assign nearby T cells to the same TLS
-  if (length(all_tls_cells) > 0) {
-    tls_centres <- unique(d[all_tls_cells, c("tls_center_x", "tls_center_y")])
-    Tcells <- subset(d, coarse_phen_vec == "T cells")
-    for (j in seq_len(nrow(tls_centres))) {
-      cx <- tls_centres$tls_center_x[j]
-      cy <- tls_centres$tls_center_y[j]
-      tid <- j
-      close_T <- which(sqrt((Tcells$x - cx)^2 + (Tcells$y - cy)^2) <= max_distance_T)
-      if (length(close_T) > 0) {
-        d$tls_id_knn[Tcells$row_index[close_T]] <- tid
-      }
+  # Step 3: Apply size and T-cell proximity filters
+  tls_counter <- 0L
+
+  for (cid in seq_len(current_id)) {
+    members <- which(component_id == cid)
+    if (length(members) < min_B_cells) next
+
+    cx <- mean(dense_b_coords[members, 1])
+    cy <- mean(dense_b_coords[members, 2])
+
+    n_t_near <- 0L
+    if (!is.null(t_coords) && nrow(t_coords) > 0) {
+      dists_t  <- sqrt((t_coords[, 1] - cx)^2 + (t_coords[, 2] - cy)^2)
+      n_t_near <- sum(dists_t <= max_distance_T, na.rm = TRUE)
     }
+
+    if (n_t_near < min_T_cells_nearby) next
+
+    tls_counter <- tls_counter + 1L
+    dense_b_original_idx <- b_idx[dense_mask][members]
+    df$tls_id_knn[dense_b_original_idx]   <- tls_counter
+    df$tls_center_x[dense_b_original_idx] <- cx
+    df$tls_center_y[dense_b_original_idx] <- cy
   }
 
-  ldata[[LSP]] <- d
-  message(sprintf("Detected %d TLS in %s", max(d$tls_id_knn), LSP))
-  return(invisible(ldata))
+  if (tls_counter == 0L)
+    message("Sample '", LSP, "': B-cell clusters found but none met T-cell ",
+            "proximity threshold. Consider lowering `min_T_cells_nearby` or ",
+            "increasing `max_distance_T`.")
+  else
+    message("Sample '", LSP, "': ", tls_counter, " TLS detected.")
+
+  ldata[[LSP]] <- df
+  ldata
 }
