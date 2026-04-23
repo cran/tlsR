@@ -1,6 +1,6 @@
 \name{detect_tic}
 \alias{detect_tic}
-\title{Detect Tumor-Infiltrating T-cell Clusters (TIC)}
+\title{Detect T-cell Immune Clusters (TIC) on the Tissue}
 \usage{
 detect_tic(sample, min_pts = 10L, min_cluster_size = 10L, ldata = NULL)
 }

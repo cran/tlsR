@@ -4,12 +4,13 @@
 \usage{
 detect_TLS(
   LSP,
+  ldata,
   k = 30L,
   bcell_density_threshold = 10,
   min_B_cells = 50L,
-  min_T_cells_nearby = 20L,
+  min_T_cells_nearby = 10L,
   max_distance_T = 50,
-  ldata = NULL
+  expand_distance = 80
 )
 }
 \arguments{
@@ -31,11 +32,13 @@ microns) for a B cell to be considered locally dense (default \code{15}).}
 \item{max_distance_T}{Numeric. Search radius (microns) for T-cell proximity
 check (default \code{50}).}
 
+\item{expand_distance}{Integer. The extended values from the boundary of the deteced B-cells clusters that the T cells are bieng integrated (default \code{80}).}
+
 \item{ldata}{Named list of data frames, or \code{NULL} to use the global
 \code{ldata} object (deprecated; pass explicitly).}
 }
 \value{
-The input \code{ldata} list, with the data frame for \code{LSP}
+The similarly formatted \code{ldata} list, with the data frame for \code{LSP}
 augmented by three new columns:
 \describe{
   \item{\code{tls_id_knn}}{Integer. \code{0} = non-TLS cell; positive
@@ -53,10 +56,28 @@ co-localisation). Phenotype labels \code{"B cell"} and \code{"B cells"}
 (and their T-cell equivalents) are both accepted.
 }
 \examples{
+# Use a 70\% sample of the data to keep CRAN check time under 10s.
+# TLS detection requires sufficient cell density; 70\% preserves
+# the spatial structure needed for reliable detection.
+# For production use, run on the full dataset (see \donttest{} below).
+data(toy_ldata)
+set.seed(42)
+idx <- sample(nrow(toy_ldata[["ToySample"]]),
+              size = floor(0.7 * nrow(toy_ldata[["ToySample"]])))
+sub_ldata <- list(ToySample = toy_ldata[["ToySample"]][idx, ])
+ldata <- detect_TLS("ToySample", k = 30, ldata = sub_ldata)
+table(ldata[["ToySample"]]$tls_id_knn)
+plot(ldata[["ToySample"]]$x, ldata[["ToySample"]]$y,
+     col = ifelse(ldata[["ToySample"]]$tls_id_knn > 0, "red", "gray"),
+     pch = 19, cex = 0.5, main = "Detected TLS (70\% sample)")
+
+\donttest{
+# Full dataset with default settings
 data(toy_ldata)
 ldata <- detect_TLS("ToySample", k = 30, ldata = toy_ldata)
 table(ldata[["ToySample"]]$tls_id_knn)
 plot(ldata[["ToySample"]]$x, ldata[["ToySample"]]$y,
      col = ifelse(ldata[["ToySample"]]$tls_id_knn > 0, "red", "gray"),
      pch = 19, cex = 0.5, main = "Detected TLS in toy data")
+}
 }

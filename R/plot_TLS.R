@@ -3,14 +3,24 @@
 #' Produces a \code{ggplot2} scatter plot of cell positions, coloured by
 #' TLS membership, T-cell cluster membership, and background phenotype.
 #'
+#' Background (non-TLS, non-TIC) cells are rendered with a lower alpha to
+#' keep them visually recessive.  TIC cells are drawn slightly larger than
+#' background and TLS cells so they stand out without dominating the plot.
+#'
 #' @param sample Character. Sample name in \code{ldata}.
 #' @param ldata Named list of data frames, or \code{NULL} to use the global
 #'   \code{ldata} object (deprecated; pass explicitly).
 #' @param show_tic Logical. Colour T-cell clusters (if \code{detect_tic} has
 #'   been run) in a distinct colour?  Default \code{TRUE}.
-#' @param point_size Numeric. Point size passed to \code{geom_point}
-#'   (default \code{0.4}).
-#' @param alpha Numeric. Point transparency (default \code{0.6}).
+#' @param point_size Numeric. Base point size passed to \code{geom_point} for
+#'   TLS cells (default \code{0.5}).  Background cells use this same size;
+#'   TIC cells are drawn at \code{point_size * tic_size_mult}.
+#' @param alpha Numeric. Point transparency for TLS cells (default \code{0.7}).
+#' @param bg_alpha Numeric. Point transparency for background cells
+#'   (default \code{0.25}).  Lower values push background further behind
+#'   the foreground structure.
+#' @param tic_size_mult Numeric. Multiplier applied to \code{point_size} for
+#'   TIC cells so they appear slightly larger (default \code{1.8}).
 #' @param tls_palette Character vector of colours for TLS IDs.  Recycled if
 #'   there are more TLS than colours.  Default uses a colourblind-friendly
 #'   palette.
@@ -36,8 +46,10 @@
 plot_TLS <- function(sample,
                      ldata        = NULL,
                      show_tic     = TRUE,
-                     point_size   = 0.4,
-                     alpha        = 0.6,
+                     point_size   = 0.5,
+                     alpha        = 0.7,
+                     bg_alpha     = 0.25,
+                     tic_size_mult = 1.8,
                      tls_palette  = c("#0072B2", "#009E73", "#CC79A7",
                                       "#D55E00", "#56B4E9", "#F0E442"),
                      tic_colour   = "#E69F00",
@@ -48,11 +60,10 @@ plot_TLS <- function(sample,
 
   df <- ldata[[sample]]
 
-  # Build grouping factor
+  # -- Build grouping factor ------------------------------------------------
   tls_ids <- sort(unique(df$tls_id_knn[!is.na(df$tls_id_knn) &
                                          df$tls_id_knn > 0]))
   n_tls   <- length(tls_ids)
-
   tls_cols <- if (n_tls > 0) rep_len(tls_palette, n_tls) else character(0)
 
   has_tic <- show_tic && "tcell_cluster_hdbscan" %in% names(df)
@@ -85,20 +96,56 @@ plot_TLS <- function(sample,
   if (has_tic)
     colour_map <- c(colour_map, TIC = tic_colour)
 
+  # -- Per-group aesthetics (size and alpha) --------------------------------
+  size_map  <- c(Background = point_size)
+  alpha_map <- c(Background = bg_alpha)
+
+  if (n_tls > 0) {
+    tls_names <- paste0("TLS ", tls_ids)
+    size_map[tls_names]  <- point_size
+    alpha_map[tls_names] <- alpha
+  }
+  if (has_tic) {
+    size_map["TIC"]  <- point_size * tic_size_mult
+    alpha_map["TIC"] <- alpha
+  }
+
+  # Map each row to its size and alpha value
+  df$.size  <- size_map[as.character(df$.group)]
+  df$.alpha <- alpha_map[as.character(df$.group)]
+
   n_tic_cells <- if (has_tic) sum(df$.group == "TIC", na.rm = TRUE) else 0L
   subtitle_txt <- paste0(n_tls, " TLS detected",
                          if (has_tic && n_tic_cells > 0)
                            paste0("; ", n_tic_cells, " TIC cells") else "")
 
-  p <- ggplot2::ggplot(df, ggplot2::aes(x = .data$x, y = .data$y,
-                                         colour = .data$.group)) +
-    ggplot2::geom_point(size = point_size, alpha = alpha) +
+  # -- Build plot in two layers so size and alpha differ by group -----------
+  # Layer 1: background (plotted first so it sits behind everything)
+  df_bg  <- df[df$.group == "Background", ]
+  df_fg  <- df[df$.group != "Background", ]
+
+  p <- ggplot2::ggplot() +
+    # Background - low alpha, small points
+    ggplot2::geom_point(
+      data  = df_bg,
+      ggplot2::aes(x = .data$x, y = .data$y, colour = .data$.group),
+      size  = point_size,
+      alpha = bg_alpha
+    ) +
+    # Foreground TLS + TIC - higher alpha; TIC larger via mapped size
+    ggplot2::geom_point(
+      data  = df_fg,
+      ggplot2::aes(x = .data$x, y = .data$y,
+                   colour = .data$.group, size = .data$.size),
+      alpha = alpha
+    ) +
     ggplot2::scale_colour_manual(values = colour_map, name = "") +
+    ggplot2::scale_size_identity() +   # use .size column directly
     ggplot2::theme_classic() +
     ggplot2::labs(
       title    = sample,
       subtitle = subtitle_txt,
-      x        = "x (um)",   # plain ASCII to avoid locale encoding issues
+      x        = "x (um)",
       y        = "y (um)"
     ) +
     ggplot2::theme(

@@ -1,3 +1,41 @@
+# tlsR 0.3.0
+
+## Breaking changes
+
+* `scan_clustering()` — completely redesigned. The function no longer runs
+  Monte Carlo CSR envelope tests. Instead it computes the **K-integral**
+  clustering index (mean positive L excess over theoretical CSR) in each
+  sliding window and — when `plot = TRUE` (now the default) — draws a
+  spatial base-graphics map with LOESS-smoothed L-excess curves and numeric
+  CI labels overlaid inside each qualifying window. The returned value is a
+  plain list of `Lest` objects (one per qualifying window). The `nsim`
+  argument has been removed; a new `min_phen_cells` argument controls the
+  per-window phenotype-cell threshold.
+
+## Improvements to existing functions
+
+* `calc_icat()` — fixed sign-ambiguity bug. The previous implementation
+  returned the raw signed trace of the FastICA mixing matrix, which could be
+  negative. The index is now computed as
+  `100 * sqrt(v1 + v2 + 2*sqrt(v1*v2)) / nrow(X)` — a normalised
+  trace-standard-deviation of the ICA-reconstructed coordinates — which is
+  always non-negative and reflects average spatial spread per cell in microns.
+
+* `plot_TLS()` — two visual improvements:
+  - Background (non-TLS, non-TIC) cells are now rendered with `bg_alpha =
+    0.25` by default, making them more visually recessive.
+  - TIC cells are drawn at `point_size * tic_size_mult` (default `1.8x`),
+    making them slightly larger than TLS cells.
+  Both new arguments (`bg_alpha`, `tic_size_mult`) are fully exposed.
+
+## Internal
+
+* NAMESPACE updated: added `grDevices::adjustcolor`, `graphics::*`,
+  `stats::cov`, `stats::loess`, `stats::predict`; removed
+  `spatstat.explore::envelope` (no longer needed).
+* DESCRIPTION Imports extended to declare `grDevices`, `graphics`, `stats`.
+* Vignette updated throughout to reflect all changes.
+
 # tlsR 0.2.0
 
 ## New functions

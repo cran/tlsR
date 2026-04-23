@@ -33,7 +33,7 @@ test_that("detect_TLS messages when k > n B cells", {
     phenotype = c("B cells", "B cells", "T cells"),
     stringsAsFactors = FALSE
   ))
-  expect_message(detect_TLS("Tiny", k = 30, ldata = tiny), "fewer B cells")
+  expect_message(detect_TLS("Tiny", k = 30, ldata = tiny), "Not enough B cells")
 })
 
 test_that("detect_TLS respects min_B_cells filter", {
